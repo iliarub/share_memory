@@ -46,8 +46,8 @@ void initwindow()
 {
 	struct winsize w;
 	ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-	STR=w.ws_row-1;
-	STOLB=w.ws_col-1;
+	STR=w.ws_row;
+	STOLB=w.ws_col;
 }
 
 void sig_winch(int signo)
@@ -60,10 +60,11 @@ void sig_winch(int signo)
 
 void getwindow()
 {
+	initwindow();
 	initscr();
 	signal(SIGWINCH, sig_winch);
 	cbreak();
-	curs_set(1);
+	curs_set(0);
 	start_color();
 	init_pair(1, COLOR_WHITE, COLOR_GREEN);
 	wnd =newwin(STR, STOLB, 0, 0);
@@ -87,42 +88,58 @@ void getwindow()
 
 void* printmsg(void* ptr)
 {
+	struct msgbuf *msg;
+	void *msgt = shmat(id, NULL, SHM_RDONLY);
+	msg=(struct msgbuf*)msgt;
 	while(1)
 	{
 		if(semop(id_sem, &semcheck , 1)==0)
 		{
-			struct msgbuf *msg;
-			void *msgt = shmat(id, NULL, SHM_RDONLY);
-			msg=(struct msgbuf**)msgt;
-			for(int i=0; msg[i].mmsg!=0; i++)
+
+			for(int i=0; msg[i].mmsg[0]!='\0'; i++)
 			{
+				wmove(wm, i+1, 2);
 				wprintw(wm, "%s", msg[i].mmsg);
+				wmove(wt, i+1, 2);
 				wprintw(wt, "%s", msg[i].time);
 			}
+		wrefresh(wm);
+		wrefresh(wt);
 		}
+		else break;
 	}
+
 
 }
 
 void writemsg()
 {
 	int j=0;
+	long int ttime;
+	struct msgbuf *msg;
+	void *msgt = shmat(id, NULL, 0);
+	msg=(struct msgbuf*)msgt;
 	while(1)
 	{
-
-		char buf[255];
+		char buf[255]="0";
 		wmove(winwrite, 1, 1);
-		for(int ch=0, i=0; (ch=wgetch(winwrite))!=10&&i<255;i++)
+		int i=0;
+		for(int ch=0;(ch=wgetch(winwrite))!=10&&i<255; i++)
 		{
 			buf[i]=ch;
 		}
-		if(semop(id_sem, &semlock[2], 2)==0)
+		i++;
+		wmove(winwrite, 1, 1);
+		while(i>0)
 		{
-			struct msgbuf *msg;
-			void *msgt = shmat(id, NULL, 0);
-			msg=(struct msgbuf**)msgt;
-			for(;msg[j].mmsg!=0;j++);
-			long int ttime;
+			wechochar(winwrite, ' ');
+			i--;
+		}
+		if(semop(id_sem, semlock, 2)==0)
+		{
+
+			for(;msg[j].mmsg[0]!=0;j++);
+
 			ttime=time(NULL);
 			strcpy(msg[j].mmsg, buf);
 			strcpy(msg[j].time, ctime(&ttime));
@@ -139,10 +156,9 @@ int main(void)
 {
 	pthread_t tid;
 	key_t key;
-	struct msgbuf buf[10];
-	key=ftok("massager.c", 'b');
+	key=ftok(".", 'b');
 	id=shmget(key, sizeof(struct msgbuf)*10, 0);
-	id_sem=semget(key, 1, 0);
+	while ((id_sem=semget(key, 1, 0))==-1);
 	getwindow();
 	pthread_create(&tid, NULL, printmsg, 0);
 	writemsg();
