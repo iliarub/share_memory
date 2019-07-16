@@ -10,11 +10,13 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
+#include <sys/msg.h>
 #include <pthread.h>
 #include <sys/types.h>
 #include <signal.h>
@@ -28,10 +30,22 @@ struct msgbuf
 
 };
 
+struct pidmsg
+{
+	    long type;
+	    char msg[255];
+
+};
+
+
 struct sembuf semlock[2]={0, 0, 0,  0, 1, 0};
 struct sembuf semcheck={0, 0, 0};
 struct sembuf semunlock={0, -1, 0};
 int id, id_sem;
+
+int pid_server;
+
+sigset_t set;
 
 WINDOW* wnd;
 WINDOW* wm;
@@ -107,8 +121,9 @@ void* printmsg(void* ptr)
 		wrefresh(wt);
 		}
 		else break;
+		int signo;
+		sigwait(&set, &signo);
 	}
-
 
 }
 
@@ -128,9 +143,9 @@ void writemsg()
 		{
 			buf[i]=ch;
 		}
-		i++;
+
 		wmove(winwrite, 1, 1);
-		while(i>0)
+		while(i>=0)
 		{
 			wechochar(winwrite, ' ');
 			i--;
@@ -142,23 +157,45 @@ void writemsg()
 
 			ttime=time(NULL);
 			strcpy(msg[j].mmsg, buf);
+
 			strcpy(msg[j].time, ctime(&ttime));
 			semop(id_sem, &semunlock, 1);
 
 		}
 
-
+		kill(SIGUSR1, pid_server);
 	}
 }
+
+int pid_to_server()
+{
+	int pid, ds;
+	struct pidmsg tmp;
+	key_t key;
+	pid=getpid();
+	sprintf(tmp.msg,"%d", pid);
+	tmp.type=1;
+	key=ftok(".", 'b');
+	while((ds=msgget(key, 0))==-1);
+	msgsnd(ds, &tmp, sizeof(struct pidmsg)-sizeof(long), 0);
+	msgrcv(ds, &tmp, sizeof(struct pidmsg)-sizeof(long), pid, 0);
+	return atoi(tmp.msg);
+}
+
+
 
 int main(void)
 
 {
 	pthread_t tid;
 	key_t key;
+	sigemptyset(&set);
+	sigaddset(&set, SIGUSR1);
+	sigprocmask(SIG_BLOCK, &set, NULL);
 	key=ftok(".", 'b');
 	id=shmget(key, sizeof(struct msgbuf)*10, 0);
 	while ((id_sem=semget(key, 1, 0))==-1);
+	pid_server= pid_to_server();
 	getwindow();
 	pthread_create(&tid, NULL, printmsg, 0);
 	writemsg();

@@ -15,6 +15,8 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
+#include <sys/msg.h>
+#include <pthread.h>
 #include <sys/types.h>
 #include <signal.h>
 #include <ncursesw/curses.h>
@@ -26,6 +28,17 @@ struct msgbuf
 	    char mmsg[255];
 
 };
+
+struct pidmsg
+{
+	    long type;
+	    char msg[255];
+
+};
+
+struct pidmsg pid_temp[5];
+
+sigset_t set;
 
 struct sembuf semlock[2]={0, 0, 0,  0, 1, 0};
 struct sembuf semcheck={0, 0, 0};
@@ -83,7 +96,7 @@ void getwindow()
 void ex(int sig)
 {
 	shmctl(id, IPC_RMID, 0);
-	semctl(id_sem, 1, 0);
+	semctl(id_sem, 2, 0);
 	curs_set(1);
 	keypad(stdscr, 0);
 	delwin(wnd);
@@ -95,8 +108,34 @@ void ex(int sig)
 
 }
 
+void* get_pid(void* ptr)
+{
 
+	int ds, pid;
+	struct pidmsg tmp;
+	key_t key;
 
+	pid=getpid();
+	sprintf(tmp.msg,"%d", pid);
+	key=ftok(".", 'b');
+	ds=msgget(key, IPC_CREAT|0666);
+	for (int i=0; i<5; i++)
+	{
+			if(pid_temp[i].msg[0]==0)
+			{
+				msgrcv(ds, &pid_temp[i], sizeof(struct pidmsg)-sizeof(long), 1, 0);
+				tmp.type=atol(pid_temp[i].msg);
+				msgsnd(ds, &tmp, sizeof(struct pidmsg)-sizeof(long), 0);
+			}
+	}
+}
+
+void kill_pid()
+{
+	for (int i=0; i<5; i++)
+		if(pid_temp[i].msg[0]!=0)
+			kill(SIGUSR1, atoi(pid_temp[i].msg));
+}
 
 void printmsg()
 {
@@ -118,6 +157,9 @@ void printmsg()
 		wrefresh(wm);
 		wrefresh(wt);
 		}
+		int signo;
+	sigwait(&set, &signo);
+	kill_pid();
 	}
 
 }
@@ -127,6 +169,9 @@ void printmsg()
 int main(void)
 
 {
+	sigemptyset(&set);
+	sigaddset(&set, SIGUSR1);
+	sigprocmask(SIG_BLOCK, &set, NULL);
 	signal(SIGINT, ex);
 	pthread_t tid;
 	key_t key;
@@ -134,6 +179,7 @@ int main(void)
 	id=shmget(key, sizeof(struct msgbuf)*10, IPC_CREAT|0666);
 	id_sem=semget(key, 1, IPC_CREAT|0666);
 	getwindow();
+	pthread_create(&tid, NULL, get_pid, 0);
 	printmsg();
 
 
