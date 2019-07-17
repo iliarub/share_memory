@@ -43,7 +43,8 @@ sigset_t set;
 struct sembuf semlock[2]={0, 0, 0,  0, 1, 0};
 struct sembuf semcheck={0, 0, 0};
 struct sembuf semunlock={0, -1, 0};
-int id, id_sem;
+int id, id_sem, ds;
+	int pid;
 
 WINDOW* wnd;
 WINDOW* wm;
@@ -97,6 +98,7 @@ void ex(int sig)
 {
 	shmctl(id, IPC_RMID, 0);
 	semctl(id_sem, 2, 0);
+	msgctl(ds, IPC_RMID, 0);
 	curs_set(1);
 	keypad(stdscr, 0);
 	delwin(wnd);
@@ -111,11 +113,10 @@ void ex(int sig)
 void* get_pid(void* ptr)
 {
 
-	int ds, pid;
 	struct pidmsg tmp;
 	key_t key;
 
-	pid=getpid();
+	printf("%d\n", pid);
 	sprintf(tmp.msg,"%d", pid);
 	key=ftok(".", 'b');
 	ds=msgget(key, IPC_CREAT|0666);
@@ -179,6 +180,7 @@ int main(void)
 	id=shmget(key, sizeof(struct msgbuf)*10, IPC_CREAT|0666);
 	id_sem=semget(key, 1, IPC_CREAT|0666);
 	getwindow();
+	pid=getpid();
 	pthread_create(&tid, NULL, get_pid, 0);
 	printmsg();
 
